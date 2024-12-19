@@ -1,3 +1,5 @@
+; fc63692
+
 section .data
     msg_erro: db "Erro", 0
     len_msg_erro: equ $-msg_erro
@@ -86,11 +88,11 @@ atualizar_cache:
 continuar:
     add rbx, 2                      ; Próximo par de caracteres
     dec rcx                         ; Decrementa o contador
-    cmp rcx, 0                      ; Verifica se o contador chegou a zero
-    jne processar_argumentos        ; Salta se o contador não for zero
+    jnz processar_argumentos        ; Salta se o contador não for zero
 
     ; Exibir estado final da cache
     call display_table
+    jmp fim
 
 erro:
     mov rax, 1                      ; syscall: write
