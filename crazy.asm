@@ -1,91 +1,105 @@
-; fcXXXXX_Cache.asm
 section .data
-    msg_erro: db "Erro: Número de argumentos inválido.", 0
+    msg_erro: db "Erro: Número insuficiente de argumentos.", 0
     len_msg_erro: equ $-msg_erro
-    cacheSize equ 16             
-    blocoSize equ 4              
-    offsetBits equ 2             
-    indiceBits equ 4             
-    tagBits equ 10               
-
-section .bss
-    cache resb cacheSize * (1 + tagBits / 8 + blocoSize)
+    offsetBits equ 2             ; Bits para deslocamento
+    indiceBits equ 4             ; Bits para índice
+    tagBits equ 10               ; Bits para tag
 
 section .text
-    extern set_validation_bit, set_tag, get_data, display_table, get_validation_bit, get_tag
-    global _start
+    extern set_validation_bit
+    extern set_tag
+    extern get_data
+    extern display_table
+    extern get_validation_bit
+    extern get_tag
 
+global _start
 _start:
-    mov rdi, [rsp]                  
-    cmp rdi, 2                      
-    jb erro                        
-    mov rsi, [rsp + 8]              
-    test rsi, rsi                   
-    je fim                         
+    ; 1. Validar argumentos
+    mov rdi, [rsp]                  ; Número de argumentos
+    cmp rdi, 2                      ; Pelo menos um argumento adicional
+    jb erro
+    mov rsi, [rsp + 8]              ; Primeiro argumento (endereços em pares ASCII)
 
-    mov rcx, rdi                    
-    sub rcx, 1                      
-    mov rbx, rsp                    
-    add rbx, 16                     
+    ; Inicializar contador e ponteiro para os argumentos
+    mov rcx, rdi                    ; Número de argumentos
+    sub rcx, 1                      ; Descontar o programa em si
+    lea rbx, [rsp + 16]             ; Apontar para o primeiro argumento
 
 processar_argumentos:
-    cmp rdx, cacheSize              
-    jae fim                         
-    movzx rdx, byte [rbx]           
-    movzx rax, byte [rbx + 1]       
-    shl rax, 8                      
-    or rax, rdx                    
+    ; Converter dois caracteres ASCII em endereço
+    movzx rax, byte [rbx]           ; Primeiro caractere (LSB)
+    movzx rdx, byte [rbx + 1]       ; Segundo caractere (MSB)
+    shl rdx, 8                      ; Deslocar MSB para a esquerda
+    or rax, rdx                     ; Combinar em um único valor de 16 bits
+    mov rsi, rax                    ; RAX contém o endereço completo
 
-    mov rcx, rax                    
-    and rcx, 0x3                   
-    shr rax, offsetBits
-    mov rdx, rax
-    and rdx, 0xF                   
-    shr rax, indiceBits             
+    ; Extrair deslocamento (offset)
+    mov r14, r12                  ; Copiar o endereço completo para R14
+    and r14, 0x3                  ; Máscara para obter os 2 bits menos significativos (deslocamento)
+    mov [offset], r14             ; Salvar deslocamento em uma variável ou registrador
 
-    mov rdi, rdx                    
+    ; Extrair índice
+    mov r14, r12                  ; Copiar novamente o endereço completo
+    shr r14, 2                    ; Deslocar 2 bits à direita para ignorar deslocamento
+    and r14, 0xF                  ; Máscara para obter os 4 bits de índice
+    mov [index], r14              ; Salvar índice em uma variável ou registrador
+
+    ; Extrair tag
+    mov r14, r12                  ; Copiar o endereço completo novamente
+    shr r14, 6                    ; Deslocar 6 bits à direita para ignorar deslocamento e índice
+    mov [tag], r14                ; Salvar tag em uma variável ou registrador
+
+    ; 3. Consultar cache
+    mov rdi, rcx                    ; Índice
     call get_validation_bit
-    cmp rax, 1                      
-    jne atualizar_cache             
+    cmp rax, 1                      ; Verificar bit de validade
+    jne reset_cache
 
-    mov rdi, rdx                    
+    mov rdi, rcx                    ; Índice
     call get_tag
-    cmp rax, rcx                    
-    jne atualizar_cache             
+    cmp rax, rsi                    ; Comparar tag
+    jne reset_cache
 
-    mov rdi, rdx                    
-    mov rsi, rcx                    
+    ; Cache hit: buscar dado
+    mov rdi, rcx                    ; Índice
+    mov rsi, rdx                    ; Offset
     call get_data
     jmp continuar
 
-atualizar_cache:
-    mov rdi, rdx                    
+reset_cache:
+    ; Atualizar bit de validade
+    mov rdi, rcx                    ; Índice
     call set_validation_bit
 
-    mov rsi, rax                    
+    ; Atualizar tag
+    mov rdi, rcx                    ; Índice
+    mov rsi, rsi                    ; Tag
     call set_tag
 
-    mov rdi, rdx                    
-    mov rsi, rcx                    
-    call get_data
+    ; Buscar dado
+    mov rdi, rcx                    ; Índice
+    mov rsi, rdx                    ; Offset
+    call get_data                   ; Buscar dado da cache
 
 continuar:
-    add rbx, 2                      
-    dec rcx                         
-    cmp rcx, 0                      
-    jne processar_argumentos        
+    add rbx, 2                      ; Avançar para o próximo par de caracteres
+    dec rcx                         ; Decrementar contador
+    jnz processar_argumentos        ; Repetir enquanto houver argumentos
 
-    call display_table              
+    ; Exibir estado final da cache
+    call display_table
+    jmp fim
 
 erro:
-    mov rax, 1                      
-    mov rdi, 1                      
-    mov rsi, msg_erro               
-    mov rdx, len_msg_erro           
+    ; Exibir mensagem de erro
+    mov rax, 1                      ; syscall: write
+    mov rdi, 1                      ; stdout
+    mov rsi, msg_erro               ; Mensagem de erro
+    mov rdx, len_msg_erro           ; Comprimento da mensagem
     syscall
-    ret
 
 fim:
-    mov rax, 60                     
-    xor rdi, rdi                    
+    mov rax, 60                     ; syscall: exit
+    xor rdi, rdi                    ; status: 0
     syscall
